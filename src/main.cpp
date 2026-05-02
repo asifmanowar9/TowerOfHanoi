@@ -12,7 +12,9 @@
 namespace {
 constexpr int kWindowWidth = 800;
 constexpr int kWindowHeight = 600;
-constexpr int kDiskCount = 3;
+constexpr int kDefaultDiskCount = 3;
+constexpr int kMinDiskCount = 3;
+constexpr int kMaxDiskCount = 7;
 
 constexpr float kBaseY = -0.7f;
 constexpr float kBaseHeight = 0.05f;
@@ -35,6 +37,26 @@ struct GameState {
     int minMoves = 0;
     bool solved = false;
     bool solvedAnnounced = false;
+    int diskCount = kDefaultDiskCount;
+};
+
+struct MoveAnimation {
+    bool active = false;
+    Disk disk{0};
+    int from = -1;
+    int to = -1;
+    float elapsed = 0.0f;
+    float duration = 0.45f;
+    float startX = 0.0f;
+    float endX = 0.0f;
+    float startY = 0.0f;
+    float endY = 0.0f;
+    float peakY = 0.0f;
+};
+
+struct AppContext {
+    GameState state;
+    MoveAnimation animation;
 };
 
 GLuint CompileShader(GLenum type, const char* source) {
@@ -80,13 +102,13 @@ void ResetGame(GameState& state) {
         tower.clear();
     }
 
-    for (int i = kDiskCount; i >= 1; --i) {
+    for (int i = state.diskCount; i >= 1; --i) {
         state.towers[0].push_back(Disk{i});
     }
 
     state.selectedTower = -1;
     state.moveCount = 0;
-    state.minMoves = (1 << kDiskCount) - 1;
+    state.minMoves = (1 << state.diskCount) - 1;
     state.solved = false;
     state.solvedAnnounced = false;
 }
@@ -104,25 +126,41 @@ bool CanMove(const GameState& state, int from, int to) {
     return state.towers[from].back().size < state.towers[to].back().size;
 }
 
-void MoveDisk(GameState& state, int from, int to) {
+float Lerp(float a, float b, float t) {
+    return a + (b - a) * t;
+}
+
+float DiskWidth(const GameState& state, int size) {
+    int denom = std::max(1, state.diskCount - 1);
+    float t = static_cast<float>(size - 1) / static_cast<float>(denom);
+    return Lerp(kDiskMinWidth, kDiskMaxWidth, t);
+}
+
+float DiskYForIndex(int index) {
+    return kBaseY + kBaseHeight * 0.5f + kDiskHeight * 0.5f + index * kDiskHeight;
+}
+
+void BeginMove(GameState& state, MoveAnimation& animation, int from, int to) {
     if (!CanMove(state, from, to)) {
         return;
     }
-    state.towers[to].push_back(state.towers[from].back());
+
+    int sourceIndex = static_cast<int>(state.towers[from].size()) - 1;
+    int destIndex = static_cast<int>(state.towers[to].size());
+
+    animation.active = true;
+    animation.disk = state.towers[from].back();
+    animation.from = from;
+    animation.to = to;
+    animation.elapsed = 0.0f;
+    animation.startX = kTowerX[from];
+    animation.endX = kTowerX[to];
+    animation.startY = DiskYForIndex(sourceIndex);
+    animation.endY = DiskYForIndex(destIndex);
+    animation.peakY = kBaseY + kPoleHeight + kDiskHeight * 1.2f;
+
     state.towers[from].pop_back();
     state.moveCount += 1;
-
-    if (static_cast<int>(state.towers[2].size()) == kDiskCount) {
-        state.solved = true;
-        if (!state.solvedAnnounced) {
-            std::puts("Solved! Press R to restart.");
-            state.solvedAnnounced = true;
-        }
-    }
-}
-
-float Lerp(float a, float b, float t) {
-    return a + (b - a) * t;
 }
 
 void UpdateWindowTitle(GLFWwindow* window, const GameState& state) {
@@ -135,7 +173,8 @@ void UpdateWindowTitle(GLFWwindow* window, const GameState& state) {
         }
     }
 
-    std::string title = "Tower of Hanoi | Moves: " + std::to_string(state.moveCount) +
+    std::string title = "Tower of Hanoi | Disks: " + std::to_string(state.diskCount) +
+                        " ([ ] or +/- to change) | Moves: " + std::to_string(state.moveCount) +
                         " / Min: " + std::to_string(state.minMoves) +
                         " | Score: " + std::to_string(score);
     if (state.solved) {
@@ -204,14 +243,6 @@ RenderContext CreateRenderContext() {
 
 void DrawRect(const RenderContext& context, float x, float y, float width, float height,
               float r, float g, float b) {
-    float transform[4] = {
-        width, 0.0f,
-        0.0f, height
-    };
-
-    float tx = x;
-    float ty = y;
-
     glUseProgram(context.program);
     glUniform3f(context.colorLocation, r, g, b);
 
@@ -234,7 +265,56 @@ void DrawRect(const RenderContext& context, float x, float y, float width, float
     glBindVertexArray(0);
 }
 
-void RenderGame(const RenderContext& context, const GameState& state) {
+void DrawSegmentDigit(const RenderContext& context, int digit, float x, float y, float scale,
+                      float r, float g, float b) {
+    static const int kSegments[10] = {
+        0b1111110, 0b0110000, 0b1101101, 0b1111001, 0b0110011,
+        0b1011011, 0b1011111, 0b1110000, 0b1111111, 0b1111011
+    };
+
+    float w = 0.05f * scale;
+    float h = 0.12f * scale;
+    float t = 0.015f * scale;
+
+    auto draw = [&](float cx, float cy, float ww, float hh) {
+        DrawRect(context, cx, cy, ww, hh, r, g, b);
+    };
+
+    int mask = kSegments[digit];
+    if (mask & 0b1000000) draw(x, y + h, w, t);        // top
+    if (mask & 0b0100000) draw(x + w * 0.5f, y + h * 0.5f, t, h); // upper right
+    if (mask & 0b0010000) draw(x + w * 0.5f, y - h * 0.5f, t, h); // lower right
+    if (mask & 0b0001000) draw(x, y - h, w, t);        // bottom
+    if (mask & 0b0000100) draw(x - w * 0.5f, y - h * 0.5f, t, h); // lower left
+    if (mask & 0b0000010) draw(x - w * 0.5f, y + h * 0.5f, t, h); // upper left
+    if (mask & 0b0000001) draw(x, y, w, t);            // middle
+}
+
+void DrawNumber(const RenderContext& context, int value, float x, float y, float scale,
+                float r, float g, float b) {
+    std::string text = std::to_string(value);
+    float spacing = 0.08f * scale;
+    float startX = x - spacing * 0.5f * static_cast<float>(text.size() - 1);
+    for (size_t i = 0; i < text.size(); ++i) {
+        int digit = text[i] - '0';
+        DrawSegmentDigit(context, digit, startX + spacing * static_cast<float>(i), y, scale, r, g, b);
+    }
+}
+
+void RenderHud(const RenderContext& context, const GameState& state) {
+    float left = -0.85f;
+    float y = 0.85f;
+    DrawNumber(context, state.moveCount, left + 0.15f, y, 1.0f, 0.9f, 0.9f, 0.9f);
+    DrawNumber(context, state.minMoves, left + 0.45f, y, 0.8f, 0.6f, 0.8f, 0.9f);
+
+    int extraMoves = std::max(0, state.moveCount - state.minMoves);
+    int score = std::max(0, 1000 - extraMoves * 25);
+    DrawNumber(context, score, left + 0.75f, y, 0.8f, 0.8f, 0.9f, 0.6f);
+
+    DrawNumber(context, state.diskCount, 0.85f, 0.85f, 0.7f, 0.7f, 0.9f, 0.7f);
+}
+
+void RenderGame(const RenderContext& context, const GameState& state, const MoveAnimation& animation) {
     glClearColor(0.08f, 0.08f, 0.12f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -250,9 +330,9 @@ void RenderGame(const RenderContext& context, const GameState& state) {
         const auto& tower = state.towers[towerIndex];
         for (int diskIndex = 0; diskIndex < static_cast<int>(tower.size()); ++diskIndex) {
             const Disk& disk = tower[diskIndex];
-            float t = static_cast<float>(disk.size - 1) / (kDiskCount - 1);
-            float width = Lerp(kDiskMinWidth, kDiskMaxWidth, t);
-            float y = kBaseY + kBaseHeight * 0.5f + kDiskHeight * 0.5f + diskIndex * kDiskHeight;
+            float t = static_cast<float>(disk.size - 1) / static_cast<float>(std::max(1, state.diskCount - 1));
+            float width = DiskWidth(state, disk.size);
+            float y = DiskYForIndex(diskIndex);
             float hue = 0.2f + 0.6f * (1.0f - t);
             float r = 0.2f + 0.6f * hue;
             float g = 0.3f + 0.5f * (1.0f - t);
@@ -261,6 +341,38 @@ void RenderGame(const RenderContext& context, const GameState& state) {
             DrawRect(context, kTowerX[towerIndex], y, width, kDiskHeight * 0.9f, r, g, b);
         }
     }
+
+    if (animation.active) {
+        float t = static_cast<float>(animation.disk.size - 1) /
+                  static_cast<float>(std::max(1, state.diskCount - 1));
+        float width = DiskWidth(state, animation.disk.size);
+        float hue = 0.2f + 0.6f * (1.0f - t);
+        float r = 0.2f + 0.6f * hue;
+        float g = 0.3f + 0.5f * (1.0f - t);
+        float b = 0.7f - 0.5f * hue;
+
+        float phaseUp = 0.3f;
+        float phaseAcross = 0.4f;
+        float tNorm = std::min(1.0f, animation.elapsed / animation.duration);
+        float x = animation.startX;
+        float y = animation.startY;
+        if (tNorm < phaseUp) {
+            float local = tNorm / phaseUp;
+            y = Lerp(animation.startY, animation.peakY, local);
+        } else if (tNorm < phaseUp + phaseAcross) {
+            float local = (tNorm - phaseUp) / phaseAcross;
+            x = Lerp(animation.startX, animation.endX, local);
+            y = animation.peakY;
+        } else {
+            float local = (tNorm - phaseUp - phaseAcross) / (1.0f - phaseUp - phaseAcross);
+            x = animation.endX;
+            y = Lerp(animation.peakY, animation.endY, local);
+        }
+
+        DrawRect(context, x, y, width, kDiskHeight * 0.9f, r, g, b);
+    }
+
+    RenderHud(context, state);
 }
 
 int TowerFromKey(int key) {
@@ -270,11 +382,15 @@ int TowerFromKey(int key) {
     return -1;
 }
 
-void HandleInput(GameState& state, int key) {
+void HandleInput(GameState& state, MoveAnimation& animation, int key) {
     if (state.solved) {
         if (key == GLFW_KEY_ESCAPE) {
             state.selectedTower = -1;
         }
+        return;
+    }
+
+    if (animation.active) {
         return;
     }
 
@@ -283,7 +399,7 @@ void HandleInput(GameState& state, int key) {
         if (state.selectedTower < 0) {
             state.selectedTower = tower;
         } else {
-            MoveDisk(state, state.selectedTower, tower);
+            BeginMove(state, animation, state.selectedTower, tower);
             state.selectedTower = -1;
         }
     }
@@ -298,17 +414,32 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
         return;
     }
 
-    GameState* state = static_cast<GameState*>(glfwGetWindowUserPointer(window));
-    if (!state) {
+    auto* app = static_cast<AppContext*>(glfwGetWindowUserPointer(window));
+    if (!app) {
         return;
     }
 
     if (key == GLFW_KEY_R) {
-        ResetGame(*state);
+        ResetGame(app->state);
+        app->animation.active = false;
         return;
     }
 
-    HandleInput(*state, key);
+    if ((key == GLFW_KEY_LEFT_BRACKET || key == GLFW_KEY_MINUS) && !app->animation.active) {
+        app->state.diskCount = std::max(kMinDiskCount, app->state.diskCount - 1);
+        ResetGame(app->state);
+        app->animation.active = false;
+        return;
+    }
+
+    if ((key == GLFW_KEY_RIGHT_BRACKET || key == GLFW_KEY_EQUAL) && !app->animation.active) {
+        app->state.diskCount = std::min(kMaxDiskCount, app->state.diskCount + 1);
+        ResetGame(app->state);
+        app->animation.active = false;
+        return;
+    }
+
+    HandleInput(app->state, app->animation, key);
 }
 }  // namespace
 
@@ -339,17 +470,39 @@ int main() {
         return 1;
     }
 
-    GameState state;
-    ResetGame(state);
-    glfwSetWindowUserPointer(window, &state);
+    AppContext app;
+    ResetGame(app.state);
+    glfwSetWindowUserPointer(window, &app);
 
     RenderContext context = CreateRenderContext();
     glViewport(0, 0, kWindowWidth, kWindowHeight);
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
-        UpdateWindowTitle(window, state);
-        RenderGame(context, state);
+
+        static double lastTime = glfwGetTime();
+        double now = glfwGetTime();
+        float delta = static_cast<float>(now - lastTime);
+        lastTime = now;
+
+        if (app.animation.active) {
+            app.animation.elapsed += delta;
+            if (app.animation.elapsed >= app.animation.duration) {
+                app.state.towers[app.animation.to].push_back(app.animation.disk);
+                app.animation.active = false;
+
+                if (static_cast<int>(app.state.towers[2].size()) == app.state.diskCount) {
+                    app.state.solved = true;
+                    if (!app.state.solvedAnnounced) {
+                        std::puts("Solved! Press R to restart.");
+                        app.state.solvedAnnounced = true;
+                    }
+                }
+            }
+        }
+
+        UpdateWindowTitle(window, app.state);
+        RenderGame(context, app.state, app.animation);
         glfwSwapBuffers(window);
     }
 
