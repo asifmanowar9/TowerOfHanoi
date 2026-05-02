@@ -1,0 +1,1 @@
+/usr/bin/c++ -g CMakeFiles/tower_of_hanoi.dir/src/main.cpp.o CMakeFiles/tower_of_hanoi.dir/external/glad/src/gl.c.o -o tower_of_hanoi   -L/usr/lib/gcc/x86_64-linux-gnu/14  /usr/lib/x86_64-linux-gnu/libglfw.so.3.3 -ldl 

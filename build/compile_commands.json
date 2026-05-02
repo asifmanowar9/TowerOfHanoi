@@ -1,0 +1,14 @@
+[
+{
+  "directory": "/media/asifmanowar/New Volume/TowerOfHanoi/build",
+  "command": "/usr/bin/c++  -I\"/media/asifmanowar/New Volume/TowerOfHanoi/external/glad/include\" -g -std=gnu++17 -o CMakeFiles/tower_of_hanoi.dir/src/main.cpp.o -c \"/media/asifmanowar/New Volume/TowerOfHanoi/src/main.cpp\"",
+  "file": "/media/asifmanowar/New Volume/TowerOfHanoi/src/main.cpp",
+  "output": "CMakeFiles/tower_of_hanoi.dir/src/main.cpp.o"
+},
+{
+  "directory": "/media/asifmanowar/New Volume/TowerOfHanoi/build",
+  "command": "/usr/bin/gcc-14  -I\"/media/asifmanowar/New Volume/TowerOfHanoi/external/glad/include\" -g -o CMakeFiles/tower_of_hanoi.dir/external/glad/src/gl.c.o -c \"/media/asifmanowar/New Volume/TowerOfHanoi/external/glad/src/gl.c\"",
+  "file": "/media/asifmanowar/New Volume/TowerOfHanoi/external/glad/src/gl.c",
+  "output": "CMakeFiles/tower_of_hanoi.dir/external/glad/src/gl.c.o"
+}
+]

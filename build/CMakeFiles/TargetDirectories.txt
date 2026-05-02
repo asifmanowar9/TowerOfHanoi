@@ -1,0 +1,3 @@
+/media/asifmanowar/New Volume/TowerOfHanoi/build/CMakeFiles/tower_of_hanoi.dir
+/media/asifmanowar/New Volume/TowerOfHanoi/build/CMakeFiles/edit_cache.dir
+/media/asifmanowar/New Volume/TowerOfHanoi/build/CMakeFiles/rebuild_cache.dir
