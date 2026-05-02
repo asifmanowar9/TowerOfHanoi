@@ -34,6 +34,7 @@ struct GameState {
     int moveCount = 0;
     int minMoves = 0;
     bool solved = false;
+    bool solvedAnnounced = false;
 };
 
 GLuint CompileShader(GLenum type, const char* source) {
@@ -87,6 +88,7 @@ void ResetGame(GameState& state) {
     state.moveCount = 0;
     state.minMoves = (1 << kDiskCount) - 1;
     state.solved = false;
+    state.solvedAnnounced = false;
 }
 
 bool CanMove(const GameState& state, int from, int to) {
@@ -112,6 +114,10 @@ void MoveDisk(GameState& state, int from, int to) {
 
     if (static_cast<int>(state.towers[2].size()) == kDiskCount) {
         state.solved = true;
+        if (!state.solvedAnnounced) {
+            std::puts("Solved! Press R to restart.");
+            state.solvedAnnounced = true;
+        }
     }
 }
 
@@ -265,6 +271,13 @@ int TowerFromKey(int key) {
 }
 
 void HandleInput(GameState& state, int key) {
+    if (state.solved) {
+        if (key == GLFW_KEY_ESCAPE) {
+            state.selectedTower = -1;
+        }
+        return;
+    }
+
     int tower = TowerFromKey(key);
     if (tower >= 0) {
         if (state.selectedTower < 0) {
